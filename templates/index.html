@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0a0e1a">
+    <title>Reverse Parking Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- ─── Top Header ─── -->
+    <header id="app-header">
+        <div class="header-left">
+            <div class="app-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <rect x="2" y="6" width="20" height="12" rx="3" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="7" cy="18" r="2" fill="currentColor"/>
+                    <circle cx="17" cy="18" r="2" fill="currentColor"/>
+                    <path d="M4 10h16" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+                </svg>
+            </div>
+            <div>
+                <h1>ParkAssist</h1>
+                <span class="header-subtitle">Rear Distance Monitor</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="connection-badge" id="connectionBadge">
+                <span class="pulse-dot"></span>
+                <span>LIVE</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ─── Warning Banner (hidden by default) ─── -->
+    <div id="warningBanner" class="warning-banner hidden">
+        <div class="warning-icon">⚠️</div>
+        <div class="warning-text">
+            <span id="warningTitle">STOP</span>
+            <span id="warningSubtitle">Object too close</span>
+        </div>
+        <div class="warning-distance" id="warningDistance">0.00m</div>
+    </div>
+
+    <!-- ─── Video Feed ─── -->
+    <section id="videoSection">
+        <div class="video-container">
+            <video id="cameraVideo" autoplay playsinline style="display:none;"></video>
+            <canvas id="cameraCanvas" style="display:none;"></canvas>
+            
+            <img id="videoFeed" src="" alt="Waiting for camera..." />
+            <div class="video-overlay-top">
+                <span class="badge badge-fps" id="fpsBadge">-- FPS</span>
+                <span class="badge badge-mode" id="modeBadge">NORMAL</span>
+            </div>
+            <div class="video-overlay-bottom" id="videoOverlayBottom">
+                <span class="object-count" id="objectCountOverlay">0 objects</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── Distance Gauge ─── -->
+    <section id="gaugeSection">
+        <div class="gauge-card">
+            <div class="gauge-header">
+                <span class="gauge-label">Nearest Object</span>
+                <span class="gauge-class" id="closestClass">--</span>
+            </div>
+            <div class="gauge-ring-wrapper">
+                <svg class="gauge-ring" viewBox="0 0 200 200">
+                    <defs>
+                        <linearGradient id="gaugeGradientSafe" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#00e676"/>
+                            <stop offset="100%" style="stop-color:#69f0ae"/>
+                        </linearGradient>
+                        <linearGradient id="gaugeGradientCaution" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#ffa726"/>
+                            <stop offset="100%" style="stop-color:#ffcc02"/>
+                        </linearGradient>
+                        <linearGradient id="gaugeGradientDanger" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#ff1744"/>
+                            <stop offset="100%" style="stop-color:#ff5252"/>
+                        </linearGradient>
+                    </defs>
+                    <!-- Background arc -->
+                    <circle class="gauge-bg" cx="100" cy="100" r="85"
+                        stroke="#1a1f30" stroke-width="14" fill="none"
+                        stroke-dasharray="400.5" stroke-dashoffset="133.5"
+                        transform="rotate(135, 100, 100)" stroke-linecap="round"/>
+                    <!-- Value arc -->
+                    <circle class="gauge-value" id="gaugeArc" cx="100" cy="100" r="85"
+                        stroke="url(#gaugeGradientSafe)" stroke-width="14" fill="none"
+                        stroke-dasharray="400.5" stroke-dashoffset="400.5"
+                        transform="rotate(135, 100, 100)" stroke-linecap="round"/>
+                </svg>
+                <div class="gauge-center">
+                    <span class="gauge-number" id="gaugeNumber">--</span>
+                    <span class="gauge-unit">metres</span>
+                </div>
+            </div>
+            <div class="gauge-zones">
+                <div class="zone zone-danger">
+                    <span class="zone-dot danger"></span>
+                    <span id="zoneDanger">&lt;0.5m</span>
+                </div>
+                <div class="zone zone-caution">
+                    <span class="zone-dot caution"></span>
+                    <span id="zoneCaution">&lt;1.0m</span>
+                </div>
+                <div class="zone zone-safe">
+                    <span class="zone-dot safe"></span>
+                    <span id="zoneSafe">&gt;2.0m</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── Detection Cards ─── -->
+    <section id="detectionsSection">
+        <div class="detections-wrapper">
+            <h2 class="section-title">Detected Objects</h2>
+            <div id="detectionList" class="detection-list">
+                <div class="empty-state" id="emptyState">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="11" cy="11" r="8"/>
+                        <path d="m21 21-4.3-4.3"/>
+                    </svg>
+                    <p>No objects detected</p>
+                    <span>Point the camera at obstacles behind the car</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── Controls ─── -->
+    <section id="controlsSection">
+        <h2 class="section-title">Controls</h2>
+        <div class="controls-grid">
+            <button class="control-btn" id="btnCameraSource" onclick="toggleCameraSource()">
+                <div class="control-icon">📷</div>
+                <span class="control-label">Source</span>
+                <span class="control-state" id="cameraSourceState">DEVICE</span>
+            </button>
+            <button class="control-btn" id="btnNightMode" onclick="toggle('night_mode')">
+                <div class="control-icon">🌙</div>
+                <span class="control-label">Night Mode</span>
+                <span class="control-state" id="nightModeState">OFF</span>
+            </button>
+            <button class="control-btn" id="btnAutoNight" onclick="toggle('auto_night')">
+                <div class="control-icon">🔆</div>
+                <span class="control-label">Auto Light</span>
+                <span class="control-state" id="autoNightState">ON</span>
+            </button>
+            <button class="control-btn" id="btnMute" onclick="toggle('mute')">
+                <div class="control-icon">🔊</div>
+                <span class="control-label">Sound</span>
+                <span class="control-state" id="muteState">ON</span>
+            </button>
+            <button class="control-btn" id="btnFullscreen" onclick="goFullscreen()" style="grid-column: span 2;">
+                <div class="control-icon">📺</div>
+                <span class="control-label">Fullscreen</span>
+                <span class="control-state">VIDEO</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- ─── System Info ─── -->
+    <section id="systemSection">
+        <h2 class="section-title">System</h2>
+        <div class="system-grid">
+            <div class="sys-item">
+                <span class="sys-label">FPS</span>
+                <span class="sys-value" id="sysFps">--</span>
+            </div>
+            <div class="sys-item">
+                <span class="sys-label">Objects</span>
+                <span class="sys-value" id="sysObjects">0</span>
+            </div>
+            <div class="sys-item">
+                <span class="sys-label">Mode</span>
+                <span class="sys-value" id="sysMode">NORMAL</span>
+            </div>
+            <div class="sys-item">
+                <span class="sys-label">Lighting</span>
+                <span class="sys-value" id="sysLighting">N/A</span>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p>Reverse Parking Assistant &mdash; Computer Vision Project</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
