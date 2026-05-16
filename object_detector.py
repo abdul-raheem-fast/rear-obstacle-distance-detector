@@ -16,9 +16,9 @@ class ObjectDetector:
             "sofa", "train", "tvmonitor"
         ]
         
-        # Keep all model classes except background so users can see detections
-        # in varied scenes (room objects, monitors, etc.).
-        self.relevant_classes = None
+        # Limit to realistic classes to reduce false positives.
+        # Set config.RELEVANT_CLASSES = None to allow all classes.
+        self.relevant_classes = config.RELEVANT_CLASSES
         
         self.net = self._load_model()
         

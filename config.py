@@ -30,8 +30,24 @@ OVERLAY_OPACITY = 0.7
 ENABLE_AUDIO_WARNINGS = True
 WARNING_COOLDOWN = 2.0
 
-CONFIDENCE_THRESHOLD = 0.05
+CONFIDENCE_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.4
+
+# Limit detections to realistic classes for this project.
+# Set to None to allow all model classes (not recommended).
+RELEVANT_CLASSES = {
+    "person",
+    "bicycle",
+    "car",
+    "bus",
+    "motorbike",
+    "chair",
+    "sofa",
+    "diningtable",
+    "tvmonitor",
+    "bottle",
+    "pottedplant"
+}
 
 COLORS = {
     "safe": (0, 255, 0),
