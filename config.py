@@ -40,23 +40,18 @@ OVERLAY_OPACITY = 0.7
 ENABLE_AUDIO_WARNINGS = True
 WARNING_COOLDOWN = 2.0
 
-CONFIDENCE_THRESHOLD = 0.4
+CONFIDENCE_THRESHOLD = 0.6
 NMS_THRESHOLD = 0.4
+
+# Filter out tiny detections (in pixels)
+MIN_BOX_WIDTH = 40
+MIN_BOX_HEIGHT = 40
 
 # Limit detections to realistic classes for this project.
 # Set to None to allow all model classes (not recommended).
 RELEVANT_CLASSES = {
     "person",
-    "bicycle",
-    "car",
-    "bus",
-    "motorbike",
-    "chair",
-    "sofa",
-    "diningtable",
-    "tvmonitor",
-    "bottle",
-    "pottedplant"
+    "car"
 }
 
 COLORS = {

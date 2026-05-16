@@ -84,6 +84,9 @@ class ObjectDetector:
                     continue
                 
                 bbox = (startX, startY, endX - startX, endY - startY)
+
+                if bbox[2] < config.MIN_BOX_WIDTH or bbox[3] < config.MIN_BOX_HEIGHT:
+                    continue
                 
                 results.append({
                     'class': class_name,

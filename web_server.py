@@ -847,32 +847,6 @@ def process_frame():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/calibrate', methods=['POST'])
-def api_calibrate():
-    """Calibrate focal length for the mobile camera using one known measurement."""
-    try:
-        data = request.get_json(force=True)
-        distance_m = float(data.get('distance_m'))
-        width_m = float(data.get('width_m'))
-        pixel_width = float(data.get('pixel_width'))
-    except Exception:
-        return jsonify({'error': 'Invalid calibration payload'}), 400
-
-    if distance_m <= 0 or width_m <= 0 or pixel_width <= 0:
-        return jsonify({'error': 'Calibration values must be > 0'}), 400
-
-    focal = state.estimator.calibrate_focal_length(distance_m, width_m, pixel_width)
-    config.FOCAL_LENGTH_MOBILE = float(focal)
-
-    if state.camera_mode == "mobile":
-        state.estimator.focal_length = float(focal)
-
-    _save_calibration(focal)
-
-    return jsonify({
-        'success': True,
-        'focal_length': round(float(focal), 2)
-    })
 
 
 @app.route('/api/toggle', methods=['POST'])
