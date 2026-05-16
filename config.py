@@ -18,10 +18,20 @@ KNOWN_OBJECTS = {
     "truck": 2.4,
     "dog": 0.5,
     "cat": 0.3,
+    "bottle": 0.08,
     "default": 0.5
 }
 
-FOCAL_LENGTH = 800
+# Camera-specific focal length (in pixels). Update with calibration per device.
+FOCAL_LENGTH_LAPTOP = 800
+FOCAL_LENGTH_MOBILE = 800
+FOCAL_LENGTH = FOCAL_LENGTH_LAPTOP
+
+# ArUco auto-calibration (optional)
+ARUCO_AUTO_CALIBRATION = True
+ARUCO_MARKER_SIZE_M = 0.05
+ARUCO_DICTIONARY = "DICT_5X5_100"
+ARUCO_CALIBRATION_COOLDOWN_S = 3.0
 
 DISPLAY_WIDTH = 1280
 DISPLAY_HEIGHT = 720

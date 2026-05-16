@@ -8,6 +8,8 @@ let isFullscreen = false;
 let pollTimer = null;
 let connectionOk = true;
 let failCount = 0;
+let lastStats = null;
+let lastDetections = [];
 const isLikelyMobile = /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
 // Configuration
@@ -486,6 +488,8 @@ function setConnected(ok) {
 
 // Master UI update
 function updateUI(d) {
+    lastStats = d || null;
+    lastDetections = d && d.detections ? d.detections : [];
     updateWarningBanner(d);
     updateGauge(d);
     updateDetections(d);
@@ -644,6 +648,7 @@ function updateControls(d) {
     const autoBtn = document.getElementById('btnAutoNight');
     const muteBtn = document.getElementById('btnMute');
     const cameraBtn = document.getElementById('btnCameraSource');
+    const calibrateBtn = document.getElementById('btnCalibrate');
 
     nightBtn.classList.toggle('active', d.night_mode);
     document.getElementById('nightModeState').textContent = d.night_mode ? 'ON' : 'OFF';
@@ -660,6 +665,10 @@ function updateControls(d) {
         cameraBtn.classList.toggle('active', d.camera_mode === 'mobile');
         document.getElementById('cameraSourceState').textContent = 
             d.camera_mode === 'mobile' ? 'PHONE' : 'LAPTOP';
+    }
+
+    if (calibrateBtn) {
+        calibrateBtn.disabled = d.camera_mode !== 'mobile';
     }
 }
 
@@ -698,6 +707,70 @@ function goFullscreen() {
 function exitFullscreen() {
     isFullscreen = false;
     document.body.classList.remove('fullscreen-video');
+}
+
+function getLargestDetection(detections) {
+    if (!detections || detections.length === 0) return null;
+    let best = detections[0];
+    for (const det of detections) {
+        if (det.bbox && det.bbox[2] > (best.bbox ? best.bbox[2] : 0)) {
+            best = det;
+        }
+    }
+    return best;
+}
+
+async function calibrateMobile() {
+    if (!lastStats || lastStats.camera_mode !== 'mobile') {
+        alert('Switch to PHONE mode before calibrating.');
+        return;
+    }
+    const det = getLargestDetection(lastDetections);
+    if (!det || !det.bbox) {
+        alert('No detections available. Point the camera at a clear object first.');
+        return;
+    }
+
+    const pixelWidth = Number(det.bbox[2]);
+    if (!Number.isFinite(pixelWidth) || pixelWidth <= 0) {
+        alert('Invalid detection width. Try again.');
+        return;
+    }
+
+    const widthInput = prompt('Enter real object width in meters (e.g., 0.08):');
+    if (widthInput == null) return;
+    const widthM = Number(widthInput);
+    if (!Number.isFinite(widthM) || widthM <= 0) {
+        alert('Width must be a positive number.');
+        return;
+    }
+
+    const distanceInput = prompt('Enter distance from phone to object in meters (e.g., 1.0):');
+    if (distanceInput == null) return;
+    const distanceM = Number(distanceInput);
+    if (!Number.isFinite(distanceM) || distanceM <= 0) {
+        alert('Distance must be a positive number.');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/calibrate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                width_m: widthM,
+                distance_m: distanceM,
+                pixel_width: pixelWidth
+            })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || 'Calibration failed');
+        }
+        alert(`Mobile focal length set to ${data.focal_length}.`);
+    } catch (err) {
+        alert(`Calibration error: ${err.message || err}`);
+    }
 }
 
 // Exit fullscreen on back/escape

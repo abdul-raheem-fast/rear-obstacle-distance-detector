@@ -9,6 +9,7 @@ import time
 import json
 import threading
 import socket
+import os
 from collections import deque
 from flask import Flask, Response, render_template, jsonify, request
 
@@ -20,6 +21,130 @@ from night_mode import NightModeEnhancer, AdaptiveEnhancer
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
 import base64
+
+CALIBRATION_FILE = os.path.join(os.path.dirname(__file__), "calibration_data.json")
+_ARUCO_AVAILABLE = hasattr(cv2, "aruco")
+
+
+def _load_calibration():
+    if not os.path.exists(CALIBRATION_FILE):
+        return
+    try:
+        with open(CALIBRATION_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        mobile_focal = data.get("mobile_focal_length")
+        laptop_focal = data.get("laptop_focal_length")
+        if isinstance(mobile_focal, (int, float)) and mobile_focal > 0:
+            config.FOCAL_LENGTH_MOBILE = float(mobile_focal)
+        if isinstance(laptop_focal, (int, float)) and laptop_focal > 0:
+            config.FOCAL_LENGTH_LAPTOP = float(laptop_focal)
+    except Exception as exc:
+        print(f"[WARN] Failed to load calibration data: {exc}")
+
+
+def _save_calibration(mobile_focal_length=None, laptop_focal_length=None):
+    try:
+        payload = {}
+        if os.path.exists(CALIBRATION_FILE):
+            with open(CALIBRATION_FILE, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        if mobile_focal_length is not None:
+            payload["mobile_focal_length"] = float(mobile_focal_length)
+        if laptop_focal_length is not None:
+            payload["laptop_focal_length"] = float(laptop_focal_length)
+        payload["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(CALIBRATION_FILE, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+    except Exception as exc:
+        print(f"[WARN] Failed to save calibration data: {exc}")
+
+
+def _get_aruco_dictionary():
+    if not _ARUCO_AVAILABLE:
+        return None
+    dict_name = getattr(config, "ARUCO_DICTIONARY", "DICT_5X5_100")
+    aruco = cv2.aruco
+    if not hasattr(aruco, dict_name):
+        dict_name = "DICT_5X5_100"
+    return aruco.getPredefinedDictionary(getattr(aruco, dict_name))
+
+
+def _estimate_marker_pixel_width(corners):
+    pts = corners.reshape(4, 2)
+    edges = [
+        np.linalg.norm(pts[0] - pts[1]),
+        np.linalg.norm(pts[1] - pts[2]),
+        np.linalg.norm(pts[2] - pts[3]),
+        np.linalg.norm(pts[3] - pts[0])
+    ]
+    return float(np.mean(edges))
+
+
+def _maybe_auto_calibrate_with_aruco(frame, camera_mode):
+    if not _ARUCO_AVAILABLE or not config.ARUCO_AUTO_CALIBRATION:
+        return
+    now = time.time()
+    if now - state.last_aruco_calib_time < config.ARUCO_CALIBRATION_COOLDOWN_S:
+        return
+
+    aruco_dict = _get_aruco_dictionary()
+    if aruco_dict is None:
+        return
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if hasattr(cv2.aruco, "ArucoDetector"):
+        detector = cv2.aruco.ArucoDetector(aruco_dict)
+        corners, ids, _ = detector.detectMarkers(gray)
+    else:
+        corners, ids, _ = cv2.aruco.detectMarkers(gray, aruco_dict)
+    if ids is None or len(corners) == 0:
+        return
+
+    marker_size = float(getattr(config, "ARUCO_MARKER_SIZE_M", 0.05))
+    if marker_size <= 0:
+        return
+
+    # Use the largest marker in view.
+    best = None
+    best_px = 0.0
+    for marker_corners in corners:
+        px = _estimate_marker_pixel_width(marker_corners)
+        if px > best_px:
+            best_px = px
+            best = marker_corners
+    if best is None or best_px < 20:
+        return
+
+    h, w = frame.shape[:2]
+    fx = float(w)
+    fy = float(w)
+    cx = w / 2.0
+    cy = h / 2.0
+    camera_matrix = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32)
+    dist_coeffs = np.zeros((5, 1), dtype=np.float32)
+
+    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers([best], marker_size, camera_matrix, dist_coeffs)
+    if tvecs is None or len(tvecs) == 0:
+        return
+
+    distance_m = float(tvecs[0][0][2])
+    if distance_m <= 0.1 or distance_m > 20.0:
+        return
+
+    focal = (best_px * distance_m) / marker_size
+    if focal <= 50 or focal > 5000:
+        return
+
+    if camera_mode == "mobile":
+        config.FOCAL_LENGTH_MOBILE = float(focal)
+        state.estimator.focal_length = float(focal)
+        _save_calibration(mobile_focal_length=focal)
+    else:
+        config.FOCAL_LENGTH_LAPTOP = float(focal)
+        state.estimator.focal_length = float(focal)
+        _save_calibration(laptop_focal_length=focal)
+
+    state.last_aruco_calib_time = now
 
 # Global State
 
@@ -59,6 +184,7 @@ class AppState:
         self.cached_server_closest_class = ""
         self.cached_server_warning_level = "safe"
         self.detector_paused_until = 0.0
+        self.last_aruco_calib_time = 0.0
         
         # Camera switching
         self.camera_mode = "laptop"  # "laptop" or "mobile"
@@ -66,7 +192,10 @@ class AppState:
         self.mobile_cap = None
         self.current_cap = None
 
+_load_calibration()
 state = AppState()
+if config.ARUCO_AUTO_CALIBRATION and not _ARUCO_AVAILABLE:
+    print("[WARN] ArUco module not available. Install opencv-contrib-python to enable auto-calibration.")
 
 # Helper Functions
 
@@ -255,6 +384,7 @@ def switch_camera(mode):
         
         # Start new camera
         if mode == "laptop":
+            state.estimator.focal_length = config.FOCAL_LENGTH_LAPTOP
             preferred_indices = [0, 1, 2, 3, 4]
             state.laptop_cap = None
             selected_index = None
@@ -278,6 +408,7 @@ def switch_camera(mode):
             return True
             
         elif mode == "mobile":
+            state.estimator.focal_length = config.FOCAL_LENGTH_MOBILE
             state.camera_mode = "mobile"
             state.latest_frame_bytes = None
             print("Switched to MOBILE camera (phone capture)")
@@ -290,6 +421,8 @@ def switch_camera(mode):
 
 def _process_frame_for_state(frame):
     calculate_fps()
+
+    _maybe_auto_calibrate_with_aruco(frame, state.camera_mode)
 
     if state.night_enhancer.enabled or state.auto_night_mode:
         state.night_enhancer.auto_mode = state.auto_night_mode
@@ -522,6 +655,7 @@ def api_status():
                 'caution_distance': _safe_float(config.CAUTION_DISTANCE),
                 'danger_distance': _safe_float(config.DANGER_DISTANCE),
                 'camera_mode': state.camera_mode,
+                'focal_length_mobile': _safe_float(config.FOCAL_LENGTH_MOBILE),
             })
         
         det_list = []
@@ -550,6 +684,7 @@ def api_status():
             'caution_distance': _safe_float(config.CAUTION_DISTANCE),
             'danger_distance': _safe_float(config.DANGER_DISTANCE),
             'camera_mode': state.camera_mode,
+            'focal_length_mobile': _safe_float(config.FOCAL_LENGTH_MOBILE),
         })
 
 
@@ -597,6 +732,8 @@ def process_frame():
             frame = cv2.resize(frame, (new_w, new_h))
 
         calculate_fps()
+
+        _maybe_auto_calibrate_with_aruco(frame, "mobile")
 
         # Night-mode enhancement (lightweight)
         if state.night_enhancer.enabled or state.auto_night_mode:
@@ -702,11 +839,40 @@ def process_frame():
                 'safe_distance': _safe_float(config.SAFE_DISTANCE),
                 'caution_distance': _safe_float(config.CAUTION_DISTANCE),
                 'danger_distance': _safe_float(config.DANGER_DISTANCE),
+                'focal_length_mobile': _safe_float(config.FOCAL_LENGTH_MOBILE),
             }
         })
     except Exception as e:
         print(f"[ERROR] /api/process failed: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/calibrate', methods=['POST'])
+def api_calibrate():
+    """Calibrate focal length for the mobile camera using one known measurement."""
+    try:
+        data = request.get_json(force=True)
+        distance_m = float(data.get('distance_m'))
+        width_m = float(data.get('width_m'))
+        pixel_width = float(data.get('pixel_width'))
+    except Exception:
+        return jsonify({'error': 'Invalid calibration payload'}), 400
+
+    if distance_m <= 0 or width_m <= 0 or pixel_width <= 0:
+        return jsonify({'error': 'Calibration values must be > 0'}), 400
+
+    focal = state.estimator.calibrate_focal_length(distance_m, width_m, pixel_width)
+    config.FOCAL_LENGTH_MOBILE = float(focal)
+
+    if state.camera_mode == "mobile":
+        state.estimator.focal_length = float(focal)
+
+    _save_calibration(focal)
+
+    return jsonify({
+        'success': True,
+        'focal_length': round(float(focal), 2)
+    })
 
 
 @app.route('/api/toggle', methods=['POST'])
